@@ -2,10 +2,9 @@ import json
 import time
 from threading import Thread
 from flask import Flask, request, render_template
-from datetime import datetime
+from datetime import datetime, timedelta
 from config import *
 import threading
-import datetime
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import relationship
 from agents_api import *
@@ -29,6 +28,9 @@ class Protocol(db.Model):
     description = db.Column(db.Text, nullable=True)
     contracts = relationship('Contract', secondary='contract_protocols')
     events = db.relationship('Event', backref='protocol', lazy=True)
+
+    def get_connection(self, contract):
+        return ContractProtocols.query.filter_by(contract_id=contract.id, protocol_id=self.id).first()
 
 
 class ContractProtocols(db.Model):
@@ -72,25 +74,40 @@ class Event(db.Model):
     protocol_id = db.Column(db.Integer, db.ForeignKey('protocol.id'),
                             nullable=False)
 
-    def get_patient_message(self, contract):
-        return (self.patient_title, self.patient_text)
+    def get_patient_message(self, protocol:ContractProtocols):
+        text = self.patient_description
+        title = self.patient_title
 
-    def get_doctor_message(self, contract):
+        message = "<b>{}</b><br><br>{}<br><br><small>Планируемый срок выполения - с <b>{}</b> по <b>{}</b></small>".format(
+            title, text, protocol.start + timedelta(days=self.start_day),
+                         protocol.start + timedelta(days=self.end_day))
+
+        return message
+
+    def get_doctor_message(self, protocol:ContractProtocols):
         if self.doctor_title:
             title = self.doctor_title
         else:
             title = self.patient_title
 
-        if self.doctor_text:
-            text = self.doctor_text
+        if self.doctor_description:
+            text = self.doctor_description
         else:
-            text = self.patient_text
+            text = self.patient_description
 
         message = "<b>{}</b><br><br>{}<br><br><small>Планируемый срок выполения - с <b>{}</b> по <b>{}</b></small>".format(
-            title, text, contract.start + datetime.timedelta(days=self.start_day),
-                         contract.start + datetime.timedelta(days=self.end_day))
+            title, text, protocol.start + timedelta(days=self.start_day),
+                         protocol.start + timedelta(days=self.end_day))
 
         return message
+
+    def get_doctor_title(self):
+        if self.doctor_title:
+            title = self.doctor_title
+        else:
+            title = self.patient_title
+
+        return title
 
 
 try:
@@ -113,7 +130,7 @@ def check_digit(number):
 
 
 def gts():
-    now = datetime.datetime.now()
+    now = datetime.now()
     return now.strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -177,6 +194,35 @@ def init():
     delayed(1, send_iteration, [])
     return 'ok'
 
+@app.route('/actions', methods=['POST'])
+def actions():
+    data = request.json
+
+    if data['api_key'] != APP_KEY:
+        print('invalid key')
+        return 'invalid key'
+
+    actions = []
+
+    try:
+        contract_id = str(data['contract_id'])
+        query = Contract.query.filter_by(id=contract_id)
+
+        if query.count() != 0:
+            contract = query.first()
+
+            for protocol in contract.protocols:
+                actions.append({
+                    "name": 'Протокол "{}"'.format(protocol.title),
+                    "link": "/protocol/{}".format(protocol.id),
+                    "type": "doctor"
+                })
+
+        return json.dumps(actions)
+
+    except Exception as e:
+        print(e)
+        return "error"
 
 @app.route('/remove', methods=['POST'])
 def remove():
@@ -214,11 +260,18 @@ def settings():
     if key != APP_KEY:
         return "<strong>Некорректный ключ доступа.</strong> Свяжитесь с технической поддержкой."
 
+    protocols = Protocol.query.all()
+    connections = {}
+
     try:
         contract_id = int(request.args.get('contract_id'))
         query = Contract.query.filter_by(id=contract_id)
         if query.count() != 0:
             contract = query.first()
+
+            for protocol in contract.protocols:
+                connections[protocols.id] = ContractProtocols.query.filter_by(contract_id=contract_id,
+                                                                              protocol_id=protocol.id).first()
         else:
             return "<strong>Ошибка. Контракт не найден.</strong> Попробуйте отключить и снова подключить интеллектуальный агент к каналу консультирвоания.  Если это не сработает, свяжитесь с технической поддержкой."
 
@@ -226,7 +279,7 @@ def settings():
         print(e)
         return "error"
 
-    return render_template('settings.html', contract=contract)
+    return render_template('settings.html', contract=contract, protocols=protocols, connections=connections)
 
 
 @app.route('/settings', methods=['POST'])
@@ -250,11 +303,14 @@ def setting_save():
                         connection = ContractProtocols.query.filter_by(contract_id=contract_id,
                                                                        protocol_id=protocol.id).first()
                         connection.start = request.form.get('protocol_{}_date'.format(protocol.id))
+                        db.session.add(connection)
 
                     elif protocol not in contract.protocols:
                         connection = ContractProtocols(contract_id=contract_id, protocol_id=protocol.id)
                         if validate_date(request.form.get('protocol_{}_date'.format(protocol.id))):
                             connection.start = request.form.get('protocol_{}_date'.format(protocol.id))
+
+                        db.session.add(connection)
                 else:
                     if protocol in contract.protocols:
                         ContractProtocols.query.filter_by(contract_id=contract_id, protocol_id=protocol.id).delete()
@@ -270,7 +326,6 @@ def setting_save():
     return """
         <strong>Спасибо, окно можно закрыть</strong><script>window.parent.postMessage('close-modal-success','*');</script>
         """
-
 
 @app.route('/<role>/event/<event_id>', methods=['GET'])
 def save_event_page(role, event_id):
@@ -303,16 +358,59 @@ def save_event_page(role, event_id):
 
         if (role == 'doctor' and not event.need_comment_doctor) or (
                 role == 'patient' and not event.need_comment_patient):
+            result = EventResults.query.filter_by(event_id=event_id, contract_id=contract_id).first()
             if role == 'doctor':
-                EventResults(event_id=event_id, contract_id=contract_id, doctor_confirmation=datetime.today().date())
+                result.doctor_confirmation = datetime.today().date()
             if role == 'patient':
-                EventResults(event_id=event_id, contract_id=contract_id, doctor_confirmation=datetime.today().date())
+                result.patient_confirmation = datetime.today().date()
             db.session.commit()
+
             return "<strong>Спасибо, окно можно закрыть</strong><script>window.parent.postMessage('close-modal-success','*');</script>"
 
         return render_template('event.html', contract=contract, event=event)
 
     except:
+        return "error"
+
+
+@app.route('/protocol/<protocol_id>', methods=['GET'])
+def protocol_page(protocol_id):
+    key = request.args.get('api_key', '')
+
+    if key != APP_KEY:
+        return "<strong>Некорректный ключ доступа.</strong> Свяжитесь с технической поддержкой."
+
+    try:
+        contract_id = int(request.args.get('contract_id', ''))
+        protocol_id = int(protocol_id)
+
+        contract_query = Contract.query.filter_by(id=contract_id)
+        events = Event.query.filter_by(protocol_id=protocol_id).all()
+
+        if contract_query.count() == 0:
+            return "<strong>Запрашиваемый канал консультирования не найден.</strong> Попробуйте отключить и заного подключить интеллектуального агента. Если это не сработает, свяжитесь с технической поддержкой."
+
+        event_results = {}
+        event_periods = {}
+
+        protocol = Protocol.query.get(protocol_id)
+        contract = Contract.query.get(contract_id)
+
+        for event in events:
+            result_query = EventResults.query.filter_by(event_id=event.id, contract_id=contract_id)
+
+            if result_query.count():
+                event_results[event.id] = result_query.first()
+
+            S = get_event_start_date(protocol.get_connection(contract), event)
+            E = get_event_end_date(protocol.get_connection(contract), event)
+            event_periods[event.id] = "{} - {}".format(S, E)
+
+
+        return render_template('protocol.html', events=events, event_results=event_results, protocol=protocol, event_periods=event_periods)
+
+    except Exception as e:
+        print(e)
         return "error"
 
 
@@ -348,13 +446,16 @@ def save_event(role, event_id):
         comment = request.form.get('comment')
         date = request.form.get('date')
 
-        if not comment or not validate_date(date):
+        if not validate_date(date):
             return "<strong>Ошибки при заполнении формы.</strong> Пожалуйста, что все поля заполнены.<br><a onclick='history.go(-1);'>Назад</a>"
 
+        result = EventResults.query.filter_by(event_id=event_id, contract_id=contract_id).first()
         if role == 'doctor':
-            EventResults(event_id=event_id, contract_id=contract_id, doctor_confirmation=date, doctor_comment=comment)
+            result.doctor_confirmation = date
+            result.doctor_comment = comment
         if role == 'patient':
-            EventResults(event_id=event_id, contract_id=contract_id, patient_confirmation=date, patient_comment=comment)
+            result.patient_confirmation = date
+            result.patient_comment = comment
         db.session.commit()
 
         return "<strong>Спасибо, окно можно закрыть</strong><script>window.parent.postMessage('close-modal-success','*');</script>"
@@ -367,26 +468,34 @@ def save_event(role, event_id):
 def index():
     return 'waiting for the thunder!'
 
+def get_event_start_date(protocol: ContractProtocols, event):
+    return protocol.start + timedelta(days=event.start_day)
 
-def get_days(A, B):
-    return (A - B).days
+def get_event_end_date(protocol: ContractProtocols, event):
+    return protocol.start + timedelta(days=event.end_day)
+
+def event_active(protocol: ContractProtocols, event):
+    today = datetime.today().date()
+    target_date = protocol.start + timedelta(days=event.notification_day)
+
+    return (today - target_date).days == 0
 
 
 def send_iteration():
     contracts = Contract.query.all()
-    today = datetime.today().date()
 
     for contract in contracts:
         for protocol in contract.protocols:
             for event in protocol.events:
-                if get_days(event.notification_day, today) == 0 and not EventResults.query.filter_by(event_id=event.id,
-                                                                                                     contract_id=contract.id).count():
-                    EventResults(event_id=event.id, contract_id=contract.id)
+                if event_active(protocol.get_connection(contract), event) and EventResults.query.filter_by(
+                        event_id=event.id, contract_id=contract.id).count() == 0:
+                    result = EventResults(event_id=event.id, contract_id=contract.id)
+                    db.session.add(result)
 
                     if event.notify_doctor:
-                        text = event.get_doctor_message()
+                        text = event.get_doctor_message(protocol.get_connection(contract))
 
-                        if not event.need_confirmation_doctor:
+                        if event.need_confirmation_doctor:
                             action_link = "doctor/event/{}".format(event.id)
                             action_name = "Подтвердить выполнение"
                         else:
@@ -397,10 +506,10 @@ def send_iteration():
                                      action_name=action_name, action_onetime=True)
 
                     if event.notify_patient:
-                        text = event.get_doctor_message()
+                        text = event.get_patient_message(protocol.get_connection(contract))
 
-                        if not event.need_confirmation_doctor:
-                            action_link = "doctor/event/{}".format(event.id)
+                        if event.need_confirmation_patient:
+                            action_link = "patient/event/{}".format(event.id)
                             action_name = "Подтвердить выполнение"
                         else:
                             action_link = None

@@ -14,22 +14,21 @@
 <div class="container" style="margin-top: 15px;" id="app">
     <h4>Настройка канала консультирования</h4>
     <form method="post">
-        <div class="form-group">
-            <label for="date">Начало отсчета:</label>
-            <input type="date" id="date" class="form-control" value="{{contract[1]}}" name="date"/>
-        </div>
 
-        <div class="form-group">
-            <label for="preset">Набор сообщений:</label>
-            <select name="preset" type="form-comtrol" id="preset">
-                <option value="pregnancy" {% if contract[2] == 'pregnancy' %} selected {% endif %}>Беременность</option>
-                <option value="heartfailure" {% if contract[2] == 'heartfailure' %} selected {% endif %}>Сердечная недостаточность</option>
-                <option value="stenocardia" {% if contract[2] == 'stenocardia' %} selected {% endif %}>Стенокардия</option>
-                <option value="fibrillation" {% if contract[2] == 'fibrillation' %} selected {% endif %}>Фибрилляция предсердий</option>
-                <option value="hypertensia" {% if contract[2] == 'hypertensia' %} selected {% endif %}>Гипертония</option>
-            </select>
-        </div>
+        {% for protocol in protocols %}
+            <h4>{{ protocol.title }} </h4>
+            <p>{{protocol.description }}</p>
 
+            <div class="form-check">
+                <input type="checkbox" name="protocol_{{protocol.id}}" value="on" class="form-check-input" {% if protocol.id in connections %} checked {% endif %}>
+                <label class="form-check-label">Включить</label>
+            </div>
+            <div class="form-group">
+                <label for="date">Начало отсчета:</label>
+                <input type="date" id="date" class="form-control" {% if protocol.id in connections %} value="{{connections[protocol.id]}}" {% endif %} name="protocol_{{protocol.id}}_date"/>
+            </div>
+
+        {% endfor %}
         <div class="form-group">
             <input type="submit" class="btn-success btn" value="Сохранить"/>
         </div>

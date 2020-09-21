@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Измерение давления</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
+          integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+    <script
+            src="https://code.jquery.com/jquery-3.4.1.min.js"
+            integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo="
+            crossorigin="anonymous"></script>
+</head>
+<body>
+<div class="container" style="margin-top: 15px;" id="app">
+    <h3>{{ protocol.title }}</h3>
+
+    <table>
+        <tr>
+            <th>Название</th>
+            <th>Период</th>
+            <th>Дата выполнения</th>
+            <th>Комментарий</th>
+        </tr>
+
+        {% for event in events %}
+            <tr>
+                <td>{{ event.get_doctor_title() }}</td>
+                <td>{{ event_periods[event.id] }}</td>
+                <td>
+                    {% if event.id in event_results %}
+                        {% if event_results[event.id].doctor_confirmation %}
+                            <p>Врач: {{event_results[event.id].doctor_confirmation}}</p>
+                        {% endif %}
+                        {% if event_results[event.id].patient_confirmation %}
+                            <p>Пациент: {{event_results[event.id].patient_confirmation}}</p>
+                        {% endif %}
+                    {% endif %}
+                </td>
+                <td>
+                    {% if event.id in event_results %}
+                        {% if event.id in event_results %}
+                        {% if event_results[event.id].doctor_comment %}
+                            <p>Врач: {{event_results[event.id].doctor_comment}}</p>
+                        {% endif %}
+                        {% if event_results[event.id].patient_comment %}
+                            <p>Пациент: {{event_results[event.id].patient_comment}}</p>
+                        {% endif %}
+                    {% endif %}
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+
+    </table>
+</div>
+
+</body>
