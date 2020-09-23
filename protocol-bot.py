@@ -476,7 +476,10 @@ def protocol_page(protocol_id):
                         else:
                             event_status[event.id] = 'fail'
             else:
-                event_status[event.id] = 'pre'
+                if today < connection.get_event_start_date():
+                    event_status[event.id] = 'pre'
+                else:
+                    event_status[event.id] = 'progress'
 
         stats = {
             "total": len(events),
