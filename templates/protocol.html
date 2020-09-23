@@ -28,7 +28,13 @@
 
     <p>Всего событий - {{ stats['total'] }}, выполнено в срок - {{ stats['done'] }}, с задержкой - {{ stats['delayed'] }}, пропущено - {{ stats['failed'] }} </p>
 
-    <table valign="top" class="table-striped" style="width: 100%;">
+    <div class="progress">
+      <div class="progress-bar bg-success" role="progressbar" style="width: {{ stats['done'] * 100 / stats['total'] }}%" aria-valuenow="{{ stats['done'] * 100 / stats['total'] }}" aria-valuemin="0" aria-valuemax="100"></div>
+      <div class="progress-bar bg-warning" role="progressbar" style="width: {{ stats['delayed'] * 100 / stats['total'] }}%" aria-valuenow="{{ stats['delayed'] * 100 / stats['total'] }}" aria-valuemin="0" aria-valuemax="100"></div>
+      <div class="progress-bar bg-danger" role="progressbar" style="width: {{ stats['failed'] * 100 / stats['total'] }}%" aria-valuenow="{{ stats['failed'] * 100 / stats['total'] }}" aria-valuemin="0" aria-valuemax="100"></div>
+    </div>
+
+    <table valign="top" class="table-striped" style="width: 100%; margin-top: 15px;">
         <tr>
             <th>Медицинское мероприятие</th>
             <th>Плановый период</th>
