@@ -1,4 +1,5 @@
 import json
+import sys
 import time
 from threading import Thread
 from flask import Flask, request, render_template
@@ -6,7 +7,6 @@ from datetime import datetime, timedelta
 from config import *
 import threading
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy.orm import relationship
 from agents_api import *
 
 app = Flask(__name__)
@@ -18,15 +18,15 @@ db = SQLAlchemy(app)
 class Contract(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     active = db.Column(db.Boolean, default=True)
-    protocols = relationship('Protocol', secondary='contract_protocols')
-    events = relationship('Event', secondary='event_results')
+    protocols = db.relationship('Protocol', secondary='contract_protocols')
+    events = db.relationship('Event', secondary='event_results')
 
 
 class Protocol(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(512))
     description = db.Column(db.Text, nullable=True)
-    contracts = relationship('Contract', secondary='contract_protocols')
+    contracts = db.relationship('Contract', secondary='contract_protocols')
     events = db.relationship('Event', backref='protocol', lazy=True)
 
     def get_connection(self, contract):
@@ -38,6 +38,28 @@ class ContractProtocols(db.Model):
     protocol_id = db.Column(db.Integer, db.ForeignKey('protocol.id'), primary_key=True)
     start = db.Column(db.Date, nullable=True)
 
+    def get_event_start_date(self, event):
+        return self.start + timedelta(days=event.start_day)
+
+    def get_event_end_date(self, event):
+        if not event.end_day:
+            return None
+        return self.start + timedelta(days=event.end_day)
+
+    def get_notification_date(self, event):
+        if event.notify_doctor or event.notify_patient:
+            return self.start + timedelta(days=event.notification_day)
+        return None
+
+    def get_formatted_event_start_date(self, event):
+        return format(self.get_event_start_date(event))
+
+    def get_formatted_event_end_date(self, event):
+        return format(self.get_event_end_date(event))
+
+    def get_formatted_notification_date(self, event):
+        return format(self.get_notification_date(event))
+
 
 class EventResults(db.Model):
     contract_id = db.Column(db.Integer, db.ForeignKey('contract.id'), primary_key=True)
@@ -48,6 +70,16 @@ class EventResults(db.Model):
 
     patient_comment = db.Column(db.Text, nullable=True)
     doctor_comment = db.Column(db.Text, nullable=True)
+
+    def get_patient_confirmation(self):
+        if not self.patient_confirmation:
+            return None
+        return self.patient_confirmation.strftime('%d.%m.%y')
+
+    def get_doctor_confirmation(self):
+        if not self.doctor_confirmation:
+            return None
+        return self.doctor_confirmation.strftime('%d.%m.%y')
 
 
 class Event(db.Model):
@@ -74,7 +106,7 @@ class Event(db.Model):
     protocol_id = db.Column(db.Integer, db.ForeignKey('protocol.id'),
                             nullable=False)
 
-    def get_patient_message(self, protocol:ContractProtocols):
+    def get_patient_message(self, protocol: ContractProtocols):
         text = self.patient_description
         title = self.patient_title
 
@@ -84,7 +116,7 @@ class Event(db.Model):
 
         return message
 
-    def get_doctor_message(self, protocol:ContractProtocols):
+    def get_doctor_message(self, protocol: ContractProtocols):
         if self.doctor_title:
             title = self.doctor_title
         else:
@@ -119,6 +151,12 @@ except:
 def delayed(delay, f, args):
     timer = threading.Timer(delay, f, args=args)
     timer.start()
+
+
+def format(date):
+    if not date:
+        return None
+    return date.strftime('%d.%m.%y')
 
 
 def check_digit(number):
@@ -194,6 +232,7 @@ def init():
     delayed(1, send_iteration, [])
     return 'ok'
 
+
 @app.route('/actions', methods=['POST'])
 def actions():
     data = request.json
@@ -223,6 +262,7 @@ def actions():
     except Exception as e:
         print(e)
         return "error"
+
 
 @app.route('/remove', methods=['POST'])
 def remove():
@@ -327,6 +367,7 @@ def setting_save():
         <strong>Спасибо, окно можно закрыть</strong><script>window.parent.postMessage('close-modal-success','*');</script>
         """
 
+
 @app.route('/<role>/event/<event_id>', methods=['GET'])
 def save_event_page(role, event_id):
     key = request.args.get('api_key', '')
@@ -381,6 +422,7 @@ def protocol_page(protocol_id):
         return "<strong>Некорректный ключ доступа.</strong> Свяжитесь с технической поддержкой."
 
     try:
+        today = datetime.today().date()
         contract_id = int(request.args.get('contract_id', ''))
         protocol_id = int(protocol_id)
 
@@ -392,6 +434,8 @@ def protocol_page(protocol_id):
 
         event_results = {}
         event_periods = {}
+        event_notifications = {}
+        event_status = {}
 
         protocol = Protocol.query.get(protocol_id)
         contract = Contract.query.get(contract_id)
@@ -402,15 +446,51 @@ def protocol_page(protocol_id):
             if result_query.count():
                 event_results[event.id] = result_query.first()
 
-            S = get_event_start_date(protocol.get_connection(contract), event)
-            E = get_event_end_date(protocol.get_connection(contract), event)
-            event_periods[event.id] = "{} - {}".format(S, E)
+            connection = protocol.get_connection(contract)
+            S = connection.get_formatted_event_start_date(event)
+            E = connection.get_formatted_event_end_date(event)
 
+            if E:
+                event_periods[event.id] = "{} - {}".format(S, E)
+            else:
+                event_periods[event.id] = S
 
-        return render_template('protocol.html', events=events, event_results=event_results, protocol=protocol, event_periods=event_periods)
+            event_notifications[event.id] = connection.get_formatted_notification_date(event)
+
+            if event.id in event_results:
+                end_date = connection.get_event_end_date(event)
+                if (not event.need_confirmation_doctor or event_results[event.id].doctor_confirmation) and (
+                        not event.need_confirmation_patient or event_results[event.id].patient_confirmation):
+                    if (not event_results[event.id].doctor_confirmation or event_results[
+                        event.id].doctor_confirmation < end_date) and (
+                            not event_results[event.id].patient_confirmation or event_results[event.id].patient_confirmation < end_date):
+                        event_status[event.id] = 'done'
+                    else:
+                        event_status[event.id] = 'delayed'
+                else:
+                    if not event.need_confirmation_doctor and not event.need_confirmation_patient:
+                        event_status[event.id] = 'pass'
+                    else:
+                        if today < end_date:
+                            event_status[event.id] = 'progress'
+                        else:
+                            event_status[event.id] = 'fail'
+            else:
+                event_status[event.id] = 'pre'
+
+        stats = {
+            "total": len(events),
+            "done": len(list(filter(lambda x: x == 'done', event_status.values()))),
+            "failed": len(list(filter(lambda x: x == 'fail', event_status.values()))),
+            "delayed": len(list(filter(lambda x: x == 'delay', event_status.values())))
+        }
+
+        return render_template('protocol.html', events=events, event_results=event_results, protocol=protocol,
+                               event_periods=event_periods, event_notifications=event_notifications,
+                               event_status=event_status, stats=stats)
 
     except Exception as e:
-        print(e)
+        print(e, sys.exc_info()[-1].tb_lineno)
         return "error"
 
 
@@ -468,11 +548,6 @@ def save_event(role, event_id):
 def index():
     return 'waiting for the thunder!'
 
-def get_event_start_date(protocol: ContractProtocols, event):
-    return protocol.start + timedelta(days=event.start_day)
-
-def get_event_end_date(protocol: ContractProtocols, event):
-    return protocol.start + timedelta(days=event.end_day)
 
 def event_active(protocol: ContractProtocols, event):
     today = datetime.today().date()
