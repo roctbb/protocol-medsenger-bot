@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Измерение давления</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
+          integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+    <script
+            src="https://code.jquery.com/jquery-3.4.1.min.js"
+            integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo="
+            crossorigin="anonymous"></script>
+
+    <style>
+        th, td {
+            padding: 4px;
+        }
+
+        li {
+            font-size: 80%;
+        }
+    </style>
+</head>
+<body>
+<div class="container" style="margin-top: 15px;" id="app">
+    <h3>{{ protocol.title }}</h3>
+
+    <p class="text-muted">{{ protocol.description }} </p>
+
+    <p>Всего событий - {{ stats['total'] }} {% if stats['additional_total'] %}(+ {{stats['additional_total']}} необязательных){% endif %}, выполнено в срок - {{ stats['done'] }}, с задержкой - {{
+        stats['delayed'] }}, пропущено - {{ stats['failed'] }} </p>
+
+    <div class="progress">
+        <div class="progress-bar bg-success" role="progressbar" style="width: {{ stats['done'] * 100 / stats['total'] }}%" aria-valuenow="{{ stats['done'] * 100 / stats['total'] }}" aria-valuemin="0"
+             aria-valuemax="100"></div>
+        <div class="progress-bar bg-warning" role="progressbar" style="width: {{ stats['delayed'] * 100 / stats['total'] }}%" aria-valuenow="{{ stats['delayed'] * 100 / stats['total'] }}" aria-valuemin="0"
+             aria-valuemax="100"></div>
+        <div class="progress-bar bg-danger" role="progressbar" style="width: {{ stats['failed'] * 100 / stats['total'] }}%" aria-valuenow="{{ stats['failed'] * 100 / stats['total'] }}" aria-valuemin="0"
+             aria-valuemax="100"></div>
+    </div>
+
+    <table valign="top" class="table-striped" style="width: 100%; margin-top: 15px;">
+        <tr>
+            <th>Медицинское мероприятие</th>
+            <th>Плановый период</th>
+            <th>Комментарий</th>
+            <th>Статус</th>
+            <th></th>
+            <th></th>
+        </tr>
+
+        {% for event in events %}
+        <tr>
+            <td>
+                {{ event.patient_title }}
+                {% if not event.is_required %}<br><small class="text-muted">(опционально)</small>{% endif %}
+            </td>
+            <td><strong>{{ event_periods[event.id] }}</strong></td>
+
+            <td>
+                {% if event.id in event_results %}
+                    {% if event_results[event.id].patient_comment %}
+                        <p>{{event_results[event.id].patient_comment}}</p>
+                    {% endif %}
+                {% endif %}
+            </td>
+            <td>
+                {% if event_status[event.id] == 'fail' %}
+                <strong style="color: red">Не выполнено</strong>
+                {% endif %}
+                {% if event_status[event.id] == 'progress' %}
+                <strong style="color: gray">Ожидание</strong>
+                {% endif %}
+                {% if event_status[event.id] == 'progress_additional' %}
+                <strong style="color: gray">Доступно</strong>
+                {% endif %}
+                {% if event_status[event.id] == 'delay' or event_status[event.id] == 'delay_additional' %}
+                <strong style="color: yellow">С опозданием</strong>
+                {% endif %}
+                {% if event_status[event.id] == 'done' or event_status[event.id] == 'done_additional' %}
+                <strong style="color: green">Выполнено</strong>
+                {% endif %}
+            </td>
+            <td>
+            </td>
+            <td>
+                {% if event_status[event.id] in ['progress', 'progress_additional', 'fail', 'fail_additional'] and event.need_confirmation_patient and not event_results[event.id].patient_confirmation %}
+                <form method="post">
+                    <input type="hidden" name="source" value="patient_protocol"/>
+                    <input type="hidden" name="event_id" value="{{ event.id }}"/>
+
+                    {% if event.need_comment_patient %}
+                    <div class="form-group form-group-sm">
+                        <label for="date"><small>Дата выполнения:</small></label>
+                        <input type="date" id="date" class="form-control form-control-sm" name="date"/>
+                    </div>
+
+                    <div class="form-group form-group-sm">
+                        <label for="date"><small>Комментарий:</small></label>
+                        <textarea id="comment" class="form-control form-control-sm" name="comment"></textarea>
+                    </div>
+                    {% endif %}
+
+                    <div class="form-group-sm">
+                        <input type="submit" class="btn-success btn btn-sm" value="Отметить, как выполненное"/>
+                    </div>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+
+    </table>
+</div>
+
+</body>

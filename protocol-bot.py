@@ -2,17 +2,30 @@ import json
 import sys
 import time
 from threading import Thread
-from flask import Flask, request, render_template
+from flask import Flask, request, render_template, redirect
 from datetime import datetime, timedelta
 from config import *
 import threading
 from flask_sqlalchemy import SQLAlchemy
 from agents_api import *
+from flask_httpauth import HTTPBasicAuth
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 db_string = "postgres://{}:{}@{}:{}/{}".format(DB_LOGIN, DB_PASSWORD, DB_HOST, DB_PORT, DB_DATABASE)
 app.config['SQLALCHEMY_DATABASE_URI'] = db_string
 db = SQLAlchemy(app)
+auth = HTTPBasicAuth()
+
+users = {
+    ADMIN_LOGIN: generate_password_hash(ADMIN_PASSWORD),
+}
+
+
+@auth.verify_password
+def verify_password(username, password):
+    if username in users and check_password_hash(users.get(username), password):
+        return username
 
 
 class Contract(db.Model):
@@ -68,6 +81,9 @@ class EventResults(db.Model):
     patient_confirmation = db.Column(db.Date, nullable=True)
     doctor_confirmation = db.Column(db.Date, nullable=True)
 
+    patient_confirmation_filled = db.Column(db.Date, nullable=True)
+    doctor_confirmation_filled = db.Column(db.Date, nullable=True)
+
     patient_comment = db.Column(db.Text, nullable=True)
     doctor_comment = db.Column(db.Text, nullable=True)
 
@@ -85,9 +101,11 @@ class EventResults(db.Model):
 class Event(db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
+    is_required = db.Column(db.Boolean, default=True)
+
     patient_title = db.Column(db.String(512))
     patient_description = db.Column(db.Text, nullable=True)
-    doctor_title = db.Column(db.String(512))
+    doctor_title = db.Column(db.String(512), nullable=True)
     doctor_description = db.Column(db.Text, nullable=True)
 
     start_day = db.Column(db.Integer, default=0)
@@ -146,6 +164,17 @@ try:
     db.create_all()
 except:
     print('cant create structure')
+
+
+def filter_empty_string(string):
+    return string if string else None
+
+
+def filter_int(value):
+    try:
+        return int(value)
+    except:
+        return None
 
 
 def delayed(delay, f, args):
@@ -253,8 +282,13 @@ def actions():
             for protocol in contract.protocols:
                 actions.append({
                     "name": 'Протокол "{}"'.format(protocol.title),
-                    "link": "/protocol/{}".format(protocol.id),
+                    "link": "/protocol/{}/doctor".format(protocol.id),
                     "type": "doctor"
+                })
+                actions.append({
+                    "name": 'Протокол "{}"'.format(protocol.title),
+                    "link": "/protocol/{}/patient".format(protocol.id),
+                    "type": "patient"
                 })
 
         return json.dumps(actions)
@@ -402,8 +436,10 @@ def save_event_page(role, event_id):
             result = EventResults.query.filter_by(event_id=event_id, contract_id=contract_id).first()
             if role == 'doctor':
                 result.doctor_confirmation = datetime.today().date()
+                result.doctor_confirmation_filled = datetime.today().date()
             if role == 'patient':
                 result.patient_confirmation = datetime.today().date()
+                result.patient_confirmation_filled = datetime.today().date()
             db.session.commit()
 
             return "<strong>Спасибо, окно можно закрыть</strong><script>window.parent.postMessage('close-modal-success','*');</script>"
@@ -414,8 +450,8 @@ def save_event_page(role, event_id):
         return "error"
 
 
-@app.route('/protocol/<protocol_id>', methods=['GET'])
-def protocol_page(protocol_id):
+@app.route('/protocol/<protocol_id>/<client>', methods=['GET'])
+def protocol_page(protocol_id, client):
     key = request.args.get('api_key', '')
 
     if key != APP_KEY:
@@ -461,40 +497,62 @@ def protocol_page(protocol_id):
                 end_date = connection.get_event_end_date(event)
                 if (not event.need_confirmation_doctor or event_results[event.id].doctor_confirmation) and (
                         not event.need_confirmation_patient or event_results[event.id].patient_confirmation):
-                    if (not event_results[event.id].doctor_confirmation or event_results[
-                        event.id].doctor_confirmation < end_date) and (
-                            not event_results[event.id].patient_confirmation or event_results[event.id].patient_confirmation < end_date):
-                        event_status[event.id] = 'done'
+                    if event.is_required:
+                        if (not event_results[event.id].doctor_confirmation or event_results[event.id].doctor_confirmation < end_date) \
+                                and (not event_results[event.id].patient_confirmation or event_results[event.id].patient_confirmation < end_date):
+                            event_status[event.id] = 'done'
+                        else:
+                            event_status[event.id] = 'delayed'
                     else:
-                        event_status[event.id] = 'delayed'
+                        if (not event_results[event.id].doctor_confirmation or event_results[event.id].doctor_confirmation < end_date) and \
+                                (not event_results[event.id].patient_confirmation or event_results[event.id].patient_confirmation < end_date):
+                            event_status[event.id] = 'done_additional'
+                        else:
+                            event_status[event.id] = 'delayed_additional'
                 else:
                     if not event.need_confirmation_doctor and not event.need_confirmation_patient:
                         event_status[event.id] = 'pass'
                     else:
-                        if today < end_date:
-                            event_status[event.id] = 'progress'
+                        if event.is_required:
+                            if today < end_date:
+                                event_status[event.id] = 'progress'
+                            else:
+                                event_status[event.id] = 'fail'
                         else:
-                            event_status[event.id] = 'fail'
+                            if today < end_date:
+                                event_status[event.id] = 'progress_additional'
+                            else:
+                                event_status[event.id] = 'fail_additional'
             else:
-                if today < connection.get_event_start_date():
+                if today < connection.get_event_start_date(event):
                     event_status[event.id] = 'pre'
                 else:
                     event_status[event.id] = 'progress'
 
         stats = {
-            "total": len(events),
+            "total": len(list(filter(lambda x: x.is_required, events))),
+            "additional_total": len(list(filter(lambda x: not x.is_required, events))),
             "done": len(list(filter(lambda x: x == 'done', event_status.values()))),
             "failed": len(list(filter(lambda x: x == 'fail', event_status.values()))),
             "delayed": len(list(filter(lambda x: x == 'delay', event_status.values())))
         }
-
-        return render_template('protocol.html', events=events, event_results=event_results, protocol=protocol,
-                               event_periods=event_periods, event_notifications=event_notifications,
-                               event_status=event_status, stats=stats)
+        if client == 'doctor':
+            return render_template('protocol_doctor.html', events=events, event_results=event_results, protocol=protocol,
+                                   event_periods=event_periods, event_notifications=event_notifications,
+                                   event_status=event_status, stats=stats)
+        else:
+            return render_template('protocol_patient.html', events=events, event_results=event_results, protocol=protocol,
+                                   event_periods=event_periods, event_notifications=event_notifications,
+                                   event_status=event_status, stats=stats)
 
     except Exception as e:
         print(e, sys.exc_info()[-1].tb_lineno)
         return "error"
+
+
+@app.route('/protocol/<protocol_id>/<role>', methods=['POST'])
+def protocol_page_redirect(protocol_id, role):
+    return save_event(role, request.form.get('event_id'))
 
 
 @app.route('/<role>/event/<event_id>', methods=['POST'])
@@ -529,19 +587,26 @@ def save_event(role, event_id):
         comment = request.form.get('comment')
         date = request.form.get('date')
 
-        if not validate_date(date):
+        if ((role == 'doctor' and event.need_comment_doctor) or (role == 'patient' and event.need_comment_patient)) and not validate_date(date):
             return "<strong>Ошибки при заполнении формы.</strong> Пожалуйста, что все поля заполнены.<br><a onclick='history.go(-1);'>Назад</a>"
 
         result = EventResults.query.filter_by(event_id=event_id, contract_id=contract_id).first()
         if role == 'doctor':
-            result.doctor_confirmation = date
+            result.doctor_confirmation = date if validate_date(date) else datetime.today().date()
             result.doctor_comment = comment
+            result.doctor_confirmation_filled = datetime.today().date()
         if role == 'patient':
-            result.patient_confirmation = date
+            result.patient_confirmation = date if validate_date(date) else datetime.today().date()
             result.patient_comment = comment
+            result.patient_confirmation_filled = datetime.today().date()
         db.session.commit()
 
-        return "<strong>Спасибо, окно можно закрыть</strong><script>window.parent.postMessage('close-modal-success','*');</script>"
+        if not request.form.get('source'):
+            return "<strong>Спасибо, окно можно закрыть</strong><script>window.parent.postMessage('close-modal-success','*');</script>"
+        elif request.form.get('source') == 'doctor_protocol':
+            return protocol_page(event.protocol_id, 'doctor')
+        else:
+            return protocol_page(event.protocol_id, 'patient')
 
     except:
         return "error"
@@ -553,6 +618,9 @@ def index():
 
 
 def event_active(protocol: ContractProtocols, event):
+    if event.notification_day is None:
+        return False
+
     today = datetime.today().date()
     target_date = protocol.start + timedelta(days=event.notification_day)
 
@@ -614,6 +682,154 @@ def save_message():
         return "<strong>Некорректный ключ доступа.</strong> Свяжитесь с технической поддержкой."
 
     return "ok"
+
+
+@app.route('/editor')
+@auth.login_required
+def editor():
+    protocols = Protocol.query.all()
+    return render_template('editor/index.html', protocols=protocols)
+
+
+@app.route('/editor/add')
+@auth.login_required
+def add_protocol_page():
+    return render_template('editor/create.html', protocol=Protocol())
+
+
+@app.route('/editor/add', methods=['POST'])
+@auth.login_required
+def add_protocol():
+    protocol = Protocol(title=request.form.get('title'), description=request.form.get('description'))
+
+    if protocol.title and protocol.description:
+        db.session.add(protocol)
+        db.session.commit()
+        return redirect('/editor')
+    else:
+        return render_template('editor/create.html', protocol=protocol)
+
+
+@app.route('/editor/<int:id>/edit')
+@auth.login_required
+def edit_protocol_page(id):
+    protocol = Protocol.query.get(id)
+    return render_template('editor/create.html', protocol=protocol)
+
+
+@app.route('/editor/<int:id>/edit', methods=['POST'])
+@auth.login_required
+def edit_protocol(id):
+    protocol = Protocol.query.get(id)
+    protocol.title = request.form.get('title')
+    protocol.description = request.form.get('description')
+
+    if protocol.title and protocol.description:
+        db.session.commit()
+        return redirect('/editor')
+    else:
+        return render_template('editor/create.html', protocol=protocol)
+
+
+@app.route('/editor/<int:id>/delete')
+@auth.login_required
+def delete_protocol(id):
+    protocol = Protocol.query.get(id)
+    db.session.delete(protocol)
+    db.session.commit()
+    return redirect('/editor')
+
+
+@app.route('/editor/<int:id>')
+@auth.login_required
+def protocol_details_page(id):
+    protocol = Protocol.query.get(id)
+    return render_template('/editor/details.html', protocol=protocol)
+
+
+@app.route('/editor/<int:id>/add')
+@auth.login_required
+def add_event_page(id):
+    return render_template('editor/create_event.html', event=Event(protocol_id=id))
+
+
+@app.route('/editor/<int:id>/add', methods=['POST'])
+@auth.login_required
+def add_event(id):
+    event = Event(protocol_id=id)
+    event.patient_title = filter_empty_string(request.form.get('patient_title'))
+    event.patient_description = filter_empty_string(request.form.get('patient_description'))
+
+    event.is_required = request.form.get('is_required') == "on"
+
+    event.doctor_title = filter_empty_string(request.form.get('doctor_title'))
+    event.doctor_description = filter_empty_string(request.form.get('doctor_description'))
+
+    event.start_day = filter_int(request.form.get('start_day'))
+    event.end_day = filter_int(request.form.get('end_day'))
+
+    event.notification_day = filter_int(request.form.get('notification_day'))
+    event.notify_patient = request.form.get('notify_patient') == "on" and event.notification_day != None
+    event.notify_doctor = request.form.get('notify_doctor') == "on" and event.notification_day != None
+
+    event.need_confirmation_doctor = request.form.get('need_confirmation_doctor') == "on" and event.notify_doctor
+    event.need_confirmation_patient = request.form.get('need_confirmation_patient') == "on" and event.notify_patient
+    event.need_comment_doctor = request.form.get('need_comment_doctor') == "on" and event.need_comment_doctor
+    event.need_comment_patient = request.form.get('need_comment_patient') == "on" and event.need_comment_patient
+
+    if event.patient_title and event.start_day != None:
+        db.session.add(event)
+        db.session.commit()
+        return redirect('/editor/{}'.format(id))
+    else:
+        return render_template('editor/create_event.html', event=event)
+
+
+@app.route('/editor/event/<int:id>/edit')
+@auth.login_required
+def edit_event_page(id):
+    event = Event.query.get(id)
+    return render_template('editor/create_event.html', event=event)
+
+
+@app.route('/editor/event/<int:id>/edit', methods=['POST'])
+@auth.login_required
+def edit_event(id):
+    event = Event.query.get(id)
+    event.patient_title = filter_empty_string(request.form.get('patient_title'))
+    event.patient_description = filter_empty_string(request.form.get('patient_description'))
+
+    event.is_required = request.form.get('is_required') == "on"
+
+    event.doctor_title = filter_empty_string(request.form.get('doctor_title'))
+    event.doctor_description = filter_empty_string(request.form.get('doctor_description'))
+
+    event.start_day = filter_int(request.form.get('start_day'))
+    event.end_day = filter_int(request.form.get('end_day'))
+
+    event.notification_day = filter_int(request.form.get('notification_day'))
+    event.notify_patient = request.form.get('notify_patient') == "on" and event.notification_day != None
+    event.notify_doctor = request.form.get('notify_doctor') == "on" and event.notification_day != None
+
+    event.need_confirmation_doctor = request.form.get('need_confirmation_doctor') == "on"
+    event.need_confirmation_patient = request.form.get('need_confirmation_patient') == "on"
+    event.need_comment_doctor = request.form.get('need_comment_doctor') == "on"
+    event.need_comment_patient = request.form.get('need_comment_patient') == "on"
+
+    if event.patient_title and event.start_day != None:
+        db.session.commit()
+        return redirect('/editor/{}'.format(event.protocol_id))
+    else:
+        return render_template('editor/create_event.html', event=event)
+
+
+@app.route('/editor/event/<int:id>/delete')
+@auth.login_required
+def delete_event(id):
+    event = Event.query.get(id)
+    db.session.delete(event)
+    db.session.commit()
+    return redirect('/editor/{}'.format(event.protocol_id))
 
 
 t = Thread(target=sender)

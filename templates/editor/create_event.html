@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Интеллектуальный агент "Протокол лечения"</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
+          integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+    <script
+            src="https://code.jquery.com/jquery-3.4.1.min.js"
+            integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo="
+            crossorigin="anonymous"></script>
+    <style>
+        .form-check {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+<div class="container" style="margin-top: 15px;" id="app">
+    <h3>Добавление или изменения события в протоколе "{{ event.protocol.title }}"</h3>
+
+    <a href="/editor/{{ event.protocol.id }}">Назад</a>
+
+    <form method="post">
+
+        <div class="form-group">
+            <label for="patient_title">Название для пациента</label>
+            <input type="text" id="patient_title" class="form-control" name="patient_title" value="{{ event.patient_title if event.patient_title }}" required/>
+        </div>
+
+        <div class="form-group">
+            <label for="patient_description">Описание для пациента</label><br>
+            <textarea id="patient_description" class="form-control" name="patient_description">{{ event.patient_description if event.patient_description }}</textarea>
+        </div>
+        
+        <div class="form-group">
+            <label for="doctor_title" class="text-muted">Название для врача</label>
+            <input type="text" id="doctor_title" class="form-control" name="doctor_title" value="{{ event.doctor_title if event.doctor_title }}"/>
+        </div>
+
+        <div class="form-group">
+            <label for="doctor_description" class="text-muted">Описание для врача</label><br>
+            <textarea id="doctor_description" class="form-control" name="doctor_description">{{ event.doctor_description if event.doctor_description }}</textarea>
+        </div>
+        
+        <div class="form-check">
+            <input type="checkbox" name="is_required" value="on" class="form-check-input" {% if event.is_required %} checked {% endif %}>
+            <label class="form-check-label text-muted">Обязательное событие</label>
+        </div>
+        
+        <div class="form-group">
+            <label for="start_day">День начала периода</label>
+            <input type="number" id="start_day" class="form-control" name="start_day" value="{{ event.start_day if event.start_day != None }}" required/>
+        </div>
+        
+        <div class="form-group">
+            <label for="end_day" class="text-muted">День окончания периода</label>
+            <input type="number" id="end_day" class="form-control" name="end_day" value="{{ event.end_day if event.end_day != None }}"/>
+        </div>
+        
+        <div class="form-check">
+            <input type="checkbox" name="notify_doctor" value="on" class="form-check-input" {% if event.notify_doctor %} checked {% endif %}>
+            <label class="form-check-label text-muted">Отправить напоминание врачу</label>
+        </div>
+        
+        <div class="form-check">
+            <input type="checkbox" name="notify_patient" value="on" class="form-check-input" {% if event.notify_patient %} checked {% endif %}>
+            <label class="form-check-label text-muted">Отправить напоминание пациенту</label>
+        </div>
+        
+        <div class="form-group">
+            <label for="notification_day" class="text-muted">День напоминания</label>
+            <input type="number" id="notification_day" class="form-control" name="notification_day" value="{{ event.notification_day if event.notification_day != None }}"/>
+        </div>
+        
+        <div class="form-check">
+            <input type="checkbox" name="need_confirmation_doctor" value="on" class="form-check-input" {% if event.need_confirmation_doctor %} checked {% endif %}>
+            <label class="form-check-label text-muted">Необходимо подтверждение от врача</label>
+        </div>
+        
+        <div class="form-check">
+            <input type="checkbox" name="need_confirmation_patient" value="on" class="form-check-input" {% if event.need_confirmation_patient %} checked {% endif %}>
+            <label class="form-check-label text-muted">Необходимо подтверждение от пациента</label>
+        </div>
+        
+        <div class="form-check">
+            <input type="checkbox" name="need_comment_doctor" value="on" class="form-check-input" {% if event.need_comment_doctor %} checked {% endif %}>
+            <label class="form-check-label text-muted">Запросить дату выполнения и комментарий у врача</label>
+        </div>
+        
+        <div class="form-check">
+            <input type="checkbox" name="need_comment_patient" value="on" class="form-check-input" {% if event.need_comment_patient %} checked {% endif %}>
+            <label class="form-check-label text-muted">Запросить дату выполнения и комментарий у пациента</label>
+        </div>
+
+        <div class="form-group">
+            <input type="submit" class="btn-success btn" value="Сохранить"/>
+        </div>
+
+    </form>
+</div>
+
+</body>
+</html>

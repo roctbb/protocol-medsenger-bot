@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Интеллектуальный агент "Протокол лечения"</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
+          integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+    <script
+            src="https://code.jquery.com/jquery-3.4.1.min.js"
+            integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo="
+            crossorigin="anonymous"></script>
+</head>
+<body>
+<div class="container" style="margin-top: 15px;" id="app">
+    <h3>Добавление или изменения протокола лечения</h3>
+
+    <a href="/editor">Назад</a>
+
+    <form method="post">
+
+        <div class="form-group">
+            <label for="title">Название протокола</label>
+            <input type="text" id="title" class="form-control" name="title" value="{{ protocol.title if protocol.title }}"/>
+        </div>
+
+        <div class="form-group">
+            <label for="description">Описание</label><br>
+            <textarea id="description" class="form-control" name="description">{{ protocol.description if protocol.description }}</textarea>
+        </div>
+
+        <div class="form-group">
+            <input type="submit" class="btn-success btn" value="Сохранить"/>
+        </div>
+
+    </form>
+</div>
+
+</body>
+</html>
