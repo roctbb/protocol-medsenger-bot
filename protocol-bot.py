@@ -344,7 +344,7 @@ def settings():
             contract = query.first()
 
             for protocol in contract.protocols:
-                connections[protocols.id] = ContractProtocols.query.filter_by(contract_id=contract_id,
+                connections[protocol.id] = ContractProtocols.query.filter_by(contract_id=contract_id,
                                                                               protocol_id=protocol.id).first()
         else:
             return "<strong>Ошибка. Контракт не найден.</strong> Попробуйте отключить и снова подключить интеллектуальный агент к каналу консультирвоания.  Если это не сработает, свяжитесь с технической поддержкой."

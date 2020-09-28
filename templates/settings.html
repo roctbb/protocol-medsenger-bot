@@ -16,7 +16,7 @@
     <form method="post">
 
         {% for protocol in protocols %}
-            <h4>{{ protocol.title }} </h4>
+            <h6>{{ protocol.title }} </h6>
             <p>{{protocol.description }}</p>
 
             <div class="form-check">
@@ -25,7 +25,7 @@
             </div>
             <div class="form-group">
                 <label for="date">Начало отсчета:</label>
-                <input type="date" id="date" class="form-control" {% if protocol.id in connections %} value="{{connections[protocol.id]}}" {% endif %} name="protocol_{{protocol.id}}_date"/>
+                <input type="date" id="date" class="form-control" {% if protocol.id in connections %} value="{{connections[protocol.id].start}}" {% endif %} name="protocol_{{protocol.id}}_date"/>
             </div>
 
         {% endfor %}
